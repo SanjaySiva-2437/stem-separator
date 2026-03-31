@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.signal import butter, filtfilt
 import soundfile as sf
+import librosa
 import os
 
 
@@ -70,3 +71,65 @@ def save_stems(stems, sr, output_dir):
         path = os.path.join(output_dir, f"{name}.wav")
         sf.write(path, audio, sr)
         print(f"Saved: {path}")
+
+def create_harmonic_percussive_masks(y):
+    """
+    Creates soft masks for harmonic and percussive separation.
+
+    Args:
+        y: audio time series
+
+    Returns:
+        D: original STFT
+        harmonic_mask: soft mask for harmonic content
+        percussive_mask: soft mask for percussive content
+    """
+    y_harmonic, y_percussive = librosa.effects.hpss(y)
+    
+    D = librosa.stft(y)
+    D_harmonic = librosa.stft(y_harmonic)
+    D_percussive = librosa.stft(y_percussive)
+    
+    total = np.abs(D_harmonic) + np.abs(D_percussive) + 1e-10
+    harmonic_mask = np.abs(D_harmonic) / total
+    percussive_mask = np.abs(D_percussive) / total
+    
+    return D, harmonic_mask, percussive_mask
+
+
+def create_vocal_mask(harmonic_mask, sr, low_hz=80, high_hz=4000):
+    """
+    Creates a vocal isolation mask from a harmonic mask.
+
+    Args:
+        harmonic_mask: soft harmonic mask
+        sr: sample rate
+        low_hz: lower vocal frequency bound
+        high_hz: upper vocal frequency bound
+
+    Returns:
+        vocal_mask: mask isolating vocal frequency range
+    """
+    freq_bins = librosa.fft_frequencies(sr=sr)
+    vocal_range = (freq_bins >= low_hz) & (freq_bins <= high_hz)
+    
+    vocal_mask = harmonic_mask.copy()
+    vocal_mask[~vocal_range, :] = 0
+    
+    return vocal_mask
+
+
+def apply_mask(D, mask, sr):
+    """
+    Applies a mask to a spectrogram and converts back to audio.
+
+    Args:
+        D: STFT matrix
+        mask: mask to apply
+        sr: sample rate
+
+    Returns:
+        separated audio as numpy array
+    """
+    D_masked = D * mask
+    return librosa.istft(D_masked)
